@@ -100,6 +100,7 @@
   .header {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 40px; flex-wrap: wrap; gap: 16px;
+    position: relative; z-index: 100;
   }
   .header-left { display: flex; align-items: center; gap: 14px; }
   .logo-mark {
@@ -127,6 +128,58 @@
     box-shadow: 0 2px 8px rgba(99,102,241,0.12);
   }
   .refresh-btn svg { width: 14px; height: 14px; }
+
+  /* ---- DATE FILTER ---- */
+  .date-filter { position: relative; }
+  .date-filter-btn {
+    color: var(--text-secondary); font-size: 13px; font-weight: 500; font-family: var(--font);
+    background: var(--white); padding: 6px 12px; border-radius: 20px;
+    border: 1px solid var(--border); cursor: pointer;
+    display: flex; align-items: center; gap: 7px; transition: all 0.2s;
+  }
+  .date-filter-btn:hover { border-color: var(--indigo); color: var(--indigo); box-shadow: 0 2px 8px rgba(99,102,241,0.12); }
+  .date-filter-btn svg { width: 14px; height: 14px; }
+  .date-filter-btn .chevron { transition: transform 0.2s; }
+  .date-filter.open .date-filter-btn .chevron { transform: rotate(180deg); }
+  .date-menu {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 50;
+    background: var(--white); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: 0 12px 32px rgba(15,23,42,0.14); padding: 6px; min-width: 220px;
+    display: none; flex-direction: column; gap: 2px;
+  }
+  .date-filter.open .date-menu { display: flex; }
+  .date-menu button[data-range] {
+    text-align: left; background: none; border: none; cursor: pointer;
+    font-family: var(--font); font-size: 13px; font-weight: 500; color: var(--text-secondary);
+    padding: 9px 12px; border-radius: 9px; transition: all 0.15s;
+  }
+  .date-menu button[data-range]:hover { background: rgba(99,102,241,0.08); color: var(--indigo); }
+  .date-menu button[data-range].active { background: var(--indigo); color: var(--white); }
+  .date-menu-custom {
+    border-top: 1px solid var(--border); margin-top: 4px; padding: 10px 8px 6px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .date-menu-custom .dmc-row { display: flex; align-items: center; gap: 8px; }
+  .date-menu-custom label { font-size: 11px; font-weight: 600; color: var(--text-tertiary); flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .date-menu-custom input[type="date"] {
+    font-family: var(--font); font-size: 12px; padding: 5px 7px; border-radius: 7px;
+    border: 1px solid var(--border); color: var(--text-secondary); background: var(--white);
+  }
+  .date-menu-custom .apply-btn {
+    background: var(--indigo); color: var(--white); border: none; border-radius: 8px;
+    padding: 7px 12px; font-family: var(--font); font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .date-menu-custom .apply-btn:hover { opacity: 0.9; }
+
+  /* ---- GRANULARITY TOGGLE ---- */
+  .chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .gran-toggle { display: inline-flex; background: var(--bg, #f1f5f9); border: 1px solid var(--border); border-radius: 18px; padding: 2px; }
+  .gran-toggle button {
+    background: none; border: none; cursor: pointer; font-family: var(--font);
+    font-size: 12px; font-weight: 600; color: var(--text-tertiary);
+    padding: 4px 12px; border-radius: 16px; transition: all 0.15s;
+  }
+  .gran-toggle button.active { background: var(--white); color: var(--indigo); box-shadow: 0 1px 3px rgba(15,23,42,0.1); }
 
   /* ---- STAT CARDS ---- */
   .stats-row {
@@ -700,7 +753,26 @@
       <h1>Claude Spend</h1>
     </div>
     <div class="header-right">
-      <span id="dateRange" class="date-range"></span>
+      <div class="date-filter" id="dateFilter">
+        <button class="date-filter-btn" id="dateFilterBtn" onclick="toggleDateMenu(event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span id="dateRange">All time</span>
+          <svg class="chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="width:11px;height:11px"><path d="M3 4.5L6 7.5L9 4.5"/></svg>
+        </button>
+        <div class="date-menu" id="dateMenu" onclick="event.stopPropagation()">
+          <button data-range="today" onclick="applyPreset('today')">Today</button>
+          <button data-range="7d" onclick="applyPreset('7d')">Last 7 days</button>
+          <button data-range="30d" onclick="applyPreset('30d')">Last 30 days</button>
+          <button data-range="all" onclick="applyPreset('all')">All time</button>
+          <div class="date-menu-custom">
+            <div class="dmc-row">
+              <label>From<input type="date" id="customFrom"></label>
+              <label>To<input type="date" id="customTo"></label>
+            </div>
+            <button class="apply-btn" onclick="applyCustomRange()">Apply custom range</button>
+          </div>
+        </div>
+      </div>
       <button class="refresh-btn" onclick="generateShareCard()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
         Share Stats
@@ -789,7 +861,13 @@
   <!-- Charts -->
   <div class="charts-grid animate delay-3">
     <div class="chart-card">
-      <h3 class="has-tooltip has-tooltip-below" style="display:inline-block">Tokens per Day<div class="tooltip">How many tokens you used each day, broken down by type and cost.</div></h3>
+      <div class="chart-head">
+        <h3 class="has-tooltip has-tooltip-below" id="dailyChartTitle" style="display:inline-block">Tokens per Day<div class="tooltip">How many tokens you used each day (or week), broken down by type and cost.</div></h3>
+        <div class="gran-toggle" id="granToggle">
+          <button data-gran="day" class="active" onclick="setGranularity('day')">Day</button>
+          <button data-gran="week" onclick="setGranularity('week')">Week</button>
+        </div>
+      </div>
       <canvas id="dailyChart"></canvas>
       <div class="legend">
         <div class="legend-item"><div class="legend-dot" style="background:var(--indigo)"></div> Input</div>
@@ -891,6 +969,29 @@
 let DATA = null;
 let currentSort = { key: 'total', dir: 'desc' };
 let searchQuery = '';
+// Active date-range filter. mode: 'all' | 'today' | '7d' | '30d' | 'custom'.
+let currentRange = { mode: 'all', from: null, to: null };
+// Chart grouping granularity: 'day' | 'week'.
+let chartGranularity = 'day';
+
+// --- Local-timezone date helpers (the user's machine clock, matching the server) ---
+function pad2(n) { return String(n).padStart(2, '0'); }
+function dateToStr(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function localToday() { return dateToStr(new Date()); }
+function addDaysStr(dateStr, delta) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + delta);
+  return dateToStr(dt);
+}
+// Monday-start of the week containing dateStr (YYYY-MM-DD).
+function weekStart(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  const dow = (dt.getDay() + 6) % 7; // Mon = 0 ... Sun = 6
+  dt.setDate(dt.getDate() - dow);
+  return dateToStr(dt);
+}
 
 function fmt(n) {
   if (n == null || isNaN(n)) return '0';
@@ -960,7 +1061,11 @@ function formatDate(d) {
 
 async function fetchData() {
   try {
-    const res = await fetch('/api/data');
+    const params = new URLSearchParams();
+    if (currentRange.from) params.set('from', currentRange.from);
+    if (currentRange.to) params.set('to', currentRange.to);
+    const qs = params.toString();
+    const res = await fetch('/api/data' + (qs ? '?' + qs : ''));
     const json = await res.json();
     if (!res.ok || json.error) {
       showError(json.error || `Server returned ${res.status}`);
@@ -976,6 +1081,91 @@ async function fetchData() {
     showError('Failed to load data: ' + err.message);
   }
 }
+
+// --- Date-range filter UI ---
+function toggleDateMenu(event) {
+  if (event) event.stopPropagation();
+  document.getElementById('dateFilter').classList.toggle('open');
+}
+function closeDateMenu() {
+  document.getElementById('dateFilter').classList.remove('open');
+}
+function applyPreset(mode) {
+  const today = localToday();
+  if (mode === 'today') currentRange = { mode, from: today, to: today };
+  else if (mode === '7d') currentRange = { mode, from: addDaysStr(today, -6), to: today };
+  else if (mode === '30d') currentRange = { mode, from: addDaysStr(today, -29), to: today };
+  else currentRange = { mode: 'all', from: null, to: null };
+  closeDateMenu();
+  fetchData();
+}
+function applyCustomRange() {
+  let from = document.getElementById('customFrom').value || null;
+  let to = document.getElementById('customTo').value || null;
+  if (!from && !to) return;
+  if (from && to && from > to) { const tmp = from; from = to; to = tmp; }
+  currentRange = { mode: 'custom', from, to };
+  closeDateMenu();
+  fetchData();
+}
+function updateDateFilterLabel() {
+  const el = document.getElementById('dateRange');
+  const labels = { today: 'Today', '7d': 'Last 7 days', '30d': 'Last 30 days', all: 'All time' };
+  if (currentRange.mode === 'custom') {
+    el.textContent = (currentRange.from ? formatDate(currentRange.from) : '…') + ' – ' + (currentRange.to ? formatDate(currentRange.to) : '…');
+  } else if (currentRange.mode === 'all') {
+    const r = DATA && DATA.fullRange;
+    el.textContent = r ? (formatDate(r.from) + ' – ' + formatDate(r.to)) : 'All time';
+  } else {
+    el.textContent = labels[currentRange.mode] || 'All time';
+  }
+  document.querySelectorAll('#dateMenu [data-range]').forEach(b =>
+    b.classList.toggle('active', b.dataset.range === currentRange.mode));
+}
+function syncCustomInputs() {
+  const r = DATA && DATA.fullRange;
+  const cf = document.getElementById('customFrom');
+  const ct = document.getElementById('customTo');
+  if (r) { cf.min = ct.min = r.from; cf.max = ct.max = r.to; }
+  if (currentRange.from) cf.value = currentRange.from;
+  if (currentRange.to) ct.value = currentRange.to;
+}
+// Close the menu when clicking outside it.
+document.addEventListener('click', (e) => {
+  const f = document.getElementById('dateFilter');
+  if (f && !f.contains(e.target)) closeDateMenu();
+});
+
+// --- Chart granularity (day / week) ---
+function setGranularity(g) {
+  chartGranularity = g;
+  document.querySelectorAll('#granToggle [data-gran]').forEach(b =>
+    b.classList.toggle('active', b.dataset.gran === g));
+  const title = document.getElementById('dailyChartTitle');
+  if (title) title.firstChild.textContent = g === 'week' ? 'Tokens per Week' : 'Tokens per Day';
+  renderDailyChart();
+}
+// Returns the daily series, optionally rolled up into Monday-start weeks.
+function getChartBuckets() {
+  const daily = DATA.dailyUsage || [];
+  if (chartGranularity !== 'week') return daily;
+  const weeks = {};
+  for (const d of daily) {
+    const wk = weekStart(d.date);
+    if (!weeks[wk]) weeks[wk] = { date: wk, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, cost: 0, sessions: 0, queries: 0 };
+    const w = weeks[wk];
+    w.inputTokens += d.inputTokens;
+    w.outputTokens += d.outputTokens;
+    w.cacheCreationTokens += d.cacheCreationTokens || 0;
+    w.cacheReadTokens += d.cacheReadTokens || 0;
+    w.totalTokens += d.totalTokens;
+    w.cost += d.cost;
+    w.sessions += d.sessions || 0;
+    w.queries += d.queries || 0;
+  }
+  return Object.values(weeks).sort((a, b) => a.date.localeCompare(b.date));
+}
+
 function showError(msg) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('app').style.display = 'none';
@@ -1020,6 +1210,8 @@ function render() {
   document.getElementById('app').style.display = 'block';
   renderWarnings();
   renderStats();
+  updateDateFilterLabel();
+  syncCustomInputs();
   renderInsights();
   renderDailyChart();
   renderModelChart();
@@ -1031,9 +1223,6 @@ function render() {
 // Stats
 function renderStats() {
   const t = DATA.totals;
-  const range = t.dateRange ? `${formatDate(t.dateRange.from)} - ${formatDate(t.dateRange.to)}` : '';
-  document.getElementById('dateRange').textContent = range;
-
   const avgTokensPerMsg = t.totalQueries > 0 ? Math.round(t.totalTokens / t.totalQueries) : 0;
 
   const cards = [
@@ -1086,8 +1275,7 @@ function renderInsights() {
 function renderDailyChart() {
   const canvas = document.getElementById('dailyChart');
   const ctx = canvas.getContext('2d');
-  const data = DATA.dailyUsage;
-  if (!data.length) return;
+  const data = getChartBuckets();
 
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.parentElement.clientWidth - 48;
@@ -1096,6 +1284,14 @@ function renderDailyChart() {
   canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
+
+  if (!data.length) {
+    ctx.font = '500 13px Inter, system-ui';
+    ctx.fillStyle = '#94A3B8';
+    ctx.textAlign = 'center';
+    ctx.fillText('No usage in this period', w / 2, h / 2);
+    return;
+  }
 
   const maxTotal = Math.max(...data.map(d => d.totalTokens));
   const barW = Math.max(8, Math.min(32, (w - 52) / data.length - 3));

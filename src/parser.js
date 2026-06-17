@@ -44,6 +44,20 @@ function getClaudeDir() {
   return path.join(os.homedir(), '.claude');
 }
 
+// Convert an ISO timestamp (stored in UTC by Claude Code) into a YYYY-MM-DD
+// calendar date in the MACHINE'S LOCAL timezone. Using `new Date(...)` and the
+// local getFullYear/getMonth/getDate getters means late-night / early-morning
+// sessions land on the correct local day for the user instead of the UTC day.
+function toLocalDateStr(ts) {
+  if (!ts) return 'unknown';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return 'unknown';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 async function parseJSONLFile(filePath) {
   const lines = [];
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
@@ -124,17 +138,19 @@ function extractSessionData(entries) {
   return queries;
 }
 
-async function parseAllSessions() {
+// Read every session JSONL on disk and return raw per-session records.
+// This is the expensive, I/O-bound step; the server caches its result and
+// re-runs the cheap aggregate() below for each date-range request.
+async function parseRawSessions() {
   const claudeDir = getClaudeDir();
   const projectsDir = path.join(claudeDir, 'projects');
-  const warnings = [];
 
   if (!fs.existsSync(claudeDir)) {
-    return { sessions: [], dailyUsage: [], modelBreakdown: [], topPrompts: [], totals: {}, warnings: [{ type: 'missing-dir', message: 'Claude Code data directory not found at ' + claudeDir + '. Have you used Claude Code yet?' }] };
+    return { sessions: [], warnings: [{ type: 'missing-dir', message: 'Claude Code data directory not found at ' + claudeDir + '. Have you used Claude Code yet?' }] };
   }
 
   if (!fs.existsSync(projectsDir)) {
-    return { sessions: [], dailyUsage: [], modelBreakdown: [], topPrompts: [], totals: {}, warnings: [{ type: 'no-projects', message: 'No project data found. Start a Claude Code conversation to generate usage data.' }] };
+    return { sessions: [], warnings: [{ type: 'no-projects', message: 'No project data found. Start a Claude Code conversation to generate usage data.' }] };
   }
 
   // Read history.jsonl for prompt display text
@@ -160,9 +176,6 @@ async function parseAllSessions() {
   });
 
   const sessions = [];
-  const dailyMap = {};
-  const modelMap = {};
-  const allPrompts = []; // for "most expensive prompts" across all sessions
 
   for (const projectDir of projectDirs) {
     const dir = path.join(projectsDir, projectDir);
@@ -199,7 +212,7 @@ async function parseAllSessions() {
       const totalTokens = inputTokens + cacheCreationTokens + cacheReadTokens + outputTokens;
 
       const firstTimestamp = entries.find(e => e.timestamp)?.timestamp;
-      const date = firstTimestamp ? firstTimestamp.split('T')[0] : 'unknown';
+      const date = toLocalDateStr(firstTimestamp);
 
       // Primary model
       const modelCounts = {};
@@ -211,44 +224,6 @@ async function parseAllSessions() {
       const firstPrompt = sessionFirstPrompt[sessionId]
         || queries.find(q => q.userPrompt)?.userPrompt
         || '(no prompt)';
-
-      // Collect per-prompt data for "most expensive prompts"
-      // Group consecutive queries under the same user prompt
-      let currentPrompt = null;
-      let promptInput = 0, promptOutput = 0, promptCacheCreation = 0, promptCacheRead = 0, promptCost = 0;
-      const flushPrompt = () => {
-        if (currentPrompt && (promptInput + promptOutput + promptCacheCreation + promptCacheRead) > 0) {
-          allPrompts.push({
-            prompt: currentPrompt.substring(0, 300),
-            inputTokens: promptInput,
-            outputTokens: promptOutput,
-            cacheCreationTokens: promptCacheCreation,
-            cacheReadTokens: promptCacheRead,
-            totalTokens: promptInput + promptOutput + promptCacheCreation + promptCacheRead,
-            cost: promptCost,
-            date,
-            sessionId,
-            model: primaryModel,
-          });
-        }
-      };
-      for (const q of queries) {
-        if (q.userPrompt && q.userPrompt !== currentPrompt) {
-          flushPrompt();
-          currentPrompt = q.userPrompt;
-          promptInput = 0;
-          promptOutput = 0;
-          promptCacheCreation = 0;
-          promptCacheRead = 0;
-          promptCost = 0;
-        }
-        promptInput += q.inputTokens;
-        promptOutput += q.outputTokens;
-        promptCacheCreation += q.cacheCreationTokens;
-        promptCacheRead += q.cacheReadTokens;
-        promptCost += q.cost;
-      }
-      flushPrompt();
 
       sessions.push({
         sessionId,
@@ -266,40 +241,112 @@ async function parseAllSessions() {
         totalTokens,
         cost,
       });
-
-      // Daily
-      if (date !== 'unknown') {
-        if (!dailyMap[date]) {
-          dailyMap[date] = { date, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, cost: 0, sessions: 0, queries: 0 };
-        }
-        dailyMap[date].inputTokens += inputTokens;
-        dailyMap[date].outputTokens += outputTokens;
-        dailyMap[date].cacheCreationTokens += cacheCreationTokens;
-        dailyMap[date].cacheReadTokens += cacheReadTokens;
-        dailyMap[date].totalTokens += totalTokens;
-        dailyMap[date].cost += cost;
-        dailyMap[date].sessions += 1;
-        dailyMap[date].queries += queries.length;
-      }
-
-      // Model
-      for (const q of queries) {
-        if (q.model === '<synthetic>' || q.model === 'unknown') continue;
-        if (!modelMap[q.model]) {
-          modelMap[q.model] = { model: q.model, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, cost: 0, queryCount: 0 };
-        }
-        modelMap[q.model].inputTokens += q.inputTokens;
-        modelMap[q.model].outputTokens += q.outputTokens;
-        modelMap[q.model].cacheCreationTokens += q.cacheCreationTokens;
-        modelMap[q.model].cacheReadTokens += q.cacheReadTokens;
-        modelMap[q.model].totalTokens += q.totalTokens;
-        modelMap[q.model].cost += q.cost;
-        modelMap[q.model].queryCount += 1;
-      }
     }
   }
 
+  return { sessions, warnings: [] };
+}
+
+// Group a session's queries into per-prompt records (consecutive queries under
+// the same user prompt belong to that prompt). Used for "most expensive prompts".
+function extractSessionPrompts(session) {
+  const out = [];
+  const { queries, date, sessionId, model } = session;
+  let currentPrompt = null;
+  let pIn = 0, pOut = 0, pCacheC = 0, pCacheR = 0, pCost = 0;
+  const flush = () => {
+    if (currentPrompt && (pIn + pOut + pCacheC + pCacheR) > 0) {
+      out.push({
+        prompt: currentPrompt.substring(0, 300),
+        inputTokens: pIn,
+        outputTokens: pOut,
+        cacheCreationTokens: pCacheC,
+        cacheReadTokens: pCacheR,
+        totalTokens: pIn + pOut + pCacheC + pCacheR,
+        cost: pCost,
+        date,
+        sessionId,
+        model,
+      });
+    }
+  };
+  for (const q of queries) {
+    if (q.userPrompt && q.userPrompt !== currentPrompt) {
+      flush();
+      currentPrompt = q.userPrompt;
+      pIn = 0; pOut = 0; pCacheC = 0; pCacheR = 0; pCost = 0;
+    }
+    pIn += q.inputTokens;
+    pOut += q.outputTokens;
+    pCacheC += q.cacheCreationTokens;
+    pCacheR += q.cacheReadTokens;
+    pCost += q.cost;
+  }
+  flush();
+  return out;
+}
+
+// Min/max local date across a list of sessions.
+function computeRange(sessions) {
+  const dates = sessions.map(s => s.date).filter(d => d && d !== 'unknown').sort();
+  if (!dates.length) return null;
+  return { from: dates[0], to: dates[dates.length - 1] };
+}
+
+// Build the full dashboard payload from a list of sessions. Pass `filter`
+// ({ from, to } inclusive, YYYY-MM-DD) to restrict to a date range; omit it for
+// all-time. Cheap and pure — no I/O — so it can run per request.
+function aggregate(allSessions, filter) {
+  const from = filter && filter.from ? filter.from : null;
+  const to = filter && filter.to ? filter.to : null;
+  const sessions = (from || to)
+    ? allSessions.filter(s => s.date !== 'unknown'
+        && (!from || s.date >= from)
+        && (!to || s.date <= to))
+    : allSessions.slice();
+
   sessions.sort((a, b) => b.totalTokens - a.totalTokens);
+
+  const dailyMap = {};
+  const modelMap = {};
+  const allPrompts = [];
+
+  for (const session of sessions) {
+    const { date, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, totalTokens, cost, queries } = session;
+
+    // Per-prompt records for "most expensive prompts"
+    for (const p of extractSessionPrompts(session)) allPrompts.push(p);
+
+    // Daily
+    if (date !== 'unknown') {
+      if (!dailyMap[date]) {
+        dailyMap[date] = { date, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, cost: 0, sessions: 0, queries: 0 };
+      }
+      dailyMap[date].inputTokens += inputTokens;
+      dailyMap[date].outputTokens += outputTokens;
+      dailyMap[date].cacheCreationTokens += cacheCreationTokens;
+      dailyMap[date].cacheReadTokens += cacheReadTokens;
+      dailyMap[date].totalTokens += totalTokens;
+      dailyMap[date].cost += cost;
+      dailyMap[date].sessions += 1;
+      dailyMap[date].queries += queries.length;
+    }
+
+    // Model
+    for (const q of queries) {
+      if (q.model === '<synthetic>' || q.model === 'unknown') continue;
+      if (!modelMap[q.model]) {
+        modelMap[q.model] = { model: q.model, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, cost: 0, queryCount: 0 };
+      }
+      modelMap[q.model].inputTokens += q.inputTokens;
+      modelMap[q.model].outputTokens += q.outputTokens;
+      modelMap[q.model].cacheCreationTokens += q.cacheCreationTokens;
+      modelMap[q.model].cacheReadTokens += q.cacheReadTokens;
+      modelMap[q.model].totalTokens += q.totalTokens;
+      modelMap[q.model].cost += q.cost;
+      modelMap[q.model].queryCount += 1;
+    }
+  }
 
   // Build per-project aggregation
   const projectMap = {};
@@ -432,8 +479,22 @@ async function parseAllSessions() {
     topPrompts,
     totals: grandTotals,
     insights,
-    warnings,
+    warnings: [],
   };
+}
+
+// Convenience: parse from disk and aggregate in one shot (no caching).
+// `filter` is an optional { from, to } date range.
+async function parseAllSessions(filter) {
+  const { sessions, warnings } = await parseRawSessions();
+  const fullRange = computeRange(sessions);
+  const data = aggregate(sessions, filter);
+  data.warnings = warnings;
+  data.fullRange = fullRange;
+  data.appliedRange = (filter && (filter.from || filter.to))
+    ? { from: filter.from || (fullRange && fullRange.from), to: filter.to || (fullRange && fullRange.to) }
+    : null;
+  return data;
 }
 
 function generateInsights(sessions, allPrompts, totals) {
@@ -701,4 +762,4 @@ function fmt(n) {
   return n.toLocaleString();
 }
 
-module.exports = { parseAllSessions };
+module.exports = { parseAllSessions, parseRawSessions, aggregate, computeRange };
