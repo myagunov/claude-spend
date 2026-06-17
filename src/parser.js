@@ -77,6 +77,12 @@ async function parseJSONLFile(filePath) {
 function extractSessionData(entries) {
   const queries = [];
   let pendingUserMessage = null;
+  // Claude Code writes a single assistant message across several JSONL lines —
+  // one per content block (thinking / text / tool_use) — and every line carries
+  // the SAME message.id and the SAME cumulative `usage`. Summing each line would
+  // double/triple-count tokens, so we count usage once per message.id and merge
+  // any tool_use names from the later lines into that one query.
+  const queryByMessageId = new Map();
 
   for (const entry of entries) {
     if (entry.type === 'user' && entry.message?.role === 'user') {
@@ -97,10 +103,26 @@ function extractSessionData(entries) {
     }
 
     if (entry.type === 'assistant' && entry.message?.usage) {
-      const usage = entry.message.usage;
       const model = entry.message.model || 'unknown';
       if (model === '<synthetic>') continue;
 
+      // tool_use names present on this particular JSONL line
+      const lineTools = [];
+      if (Array.isArray(entry.message.content)) {
+        for (const block of entry.message.content) {
+          if (block.type === 'tool_use' && block.name) lineTools.push(block.name);
+        }
+      }
+
+      // Already counted this message? Merge this line's tools and skip its usage.
+      const messageId = entry.message.id;
+      if (messageId && queryByMessageId.has(messageId)) {
+        const existing = queryByMessageId.get(messageId);
+        for (const t of lineTools) existing.tools.push(t);
+        continue;
+      }
+
+      const usage = entry.message.usage;
       const pricing = getPricing(model);
       const inputTokens = usage.input_tokens || 0;
       const cacheCreationTokens = usage.cache_creation_input_tokens || 0;
@@ -112,14 +134,7 @@ function extractSessionData(entries) {
         + (cacheReadTokens * pricing.cacheRead)
         + (outputTokens * pricing.output);
 
-      const tools = [];
-      if (Array.isArray(entry.message.content)) {
-        for (const block of entry.message.content) {
-          if (block.type === 'tool_use' && block.name) tools.push(block.name);
-        }
-      }
-
-      queries.push({
+      const query = {
         userPrompt: pendingUserMessage?.text || null,
         userTimestamp: pendingUserMessage?.timestamp || null,
         assistantTimestamp: entry.timestamp,
@@ -130,8 +145,10 @@ function extractSessionData(entries) {
         outputTokens,
         totalTokens,
         cost,
-        tools,
-      });
+        tools: lineTools,
+      };
+      queries.push(query);
+      if (messageId) queryByMessageId.set(messageId, query);
     }
   }
 
