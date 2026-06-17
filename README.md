@@ -22,7 +22,7 @@ See where your Claude Code tokens go. One command, zero setup.
 ## Install
 
 ```
-npx claude-spend
+npx github:myagunov/claude-spend
 ```
 
 That's it. Opens a dashboard in your browser.
